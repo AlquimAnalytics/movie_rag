@@ -1,0 +1,37 @@
+{
+    "_comment": "MovieRAG Configuration Example - Copy this to chatbot.cfg and customize",
+    
+    "host": "0.0.0.0",
+    "port": 5005,
+    
+    "_comment_data_pipeline": "Data pipeline directories (relative to config file)",
+    "landing_area": "../data/01_landing",
+    "staging_area": "../data/02_staging", 
+    "prepared_area": "../data/03_prepared",
+    
+    "_comment_data_stores": "Database and vector store filenames",
+    "sql_db_fname": "movies.db",
+    "embedding_store_fname": "movie_embeddings.json",
+    
+    "_comment_models": "LLM and embedding model configuration",
+    "model_provider": "openai",
+    "model_name": "gpt-4o-mini",
+    "embedding_model": "text-embedding-3-small",
+    "openai_api_key": "",
+    
+    "_comment_model_alternatives": "Alternative model configurations:",
+    "_alt_ollama": "Set model_provider to 'ollama' and model_name to 'qwen2.5:7b' for local inference",
+    "_alt_local_embeddings": "For local embeddings with Ollama, use 'nomic-embed-text'",
+    "_alt_api_key": "Set your OpenAI API key above, or use environment variable OPENAI_API_KEY",
+    
+    "_comment_neo4j": "Neo4j graph database (optional - currently disabled)",
+    "graph_url": "",
+    "graph_username": "",
+    "graph_password": "",
+    
+    "_comment_behavior": "Application behavior settings",
+    "with_history": true,
+    "verbose": true,
+    "delete_table": false,
+    "delete_graph": false
+}

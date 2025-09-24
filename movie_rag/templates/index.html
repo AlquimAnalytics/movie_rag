@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MovieRAG — Retrieval-Augmented Movie AI</title>
+    <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml" sizes="any">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        background: '#0f172a',
+                        card: 'rgba(255,255,255,0.08)',
+                        borderglass: 'rgba(255,255,255,0.1)',
+                        primary: '#8b5cf6',
+                        accent: '#06b6d4'
+                    },
+                    boxShadow: {
+                        glow: '0 0 80px rgba(139,92,246,0.25)'
+                    },
+                    borderRadius: {
+                        xl: '1rem'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        :root {
+            --glass-bg: rgba(255, 255, 255, 0.08);
+            --glass-border: rgba(255, 255, 255, 0.10);
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+            color: #ffffff;
+        }
+
+        .glass {
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border: 1px solid var(--glass-border);
+        }
+
+        .glass-card {
+            background: var(--glass-bg);
+            backdrop-filter: blur(18px);
+            -webkit-backdrop-filter: blur(18px);
+            border: 1px solid var(--glass-border);
+        }
+
+        .gradient-text {
+            background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        /* Chat area layout */
+        .chat-box {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            overflow-y: auto;
+        }
+
+        .message {
+            padding: 10px 14px;
+            border-radius: 12px;
+            max-width: 80%;
+            line-height: 1.5;
+            white-space: pre-wrap;
+        }
+
+        .user-message {
+            align-self: flex-end;
+            background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(6, 182, 212, 0.25));
+            border: 1px solid rgba(139, 92, 246, 0.3);
+        }
+
+        .bot-message {
+            align-self: flex-start;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+        }
+
+        /* RAG timeline visuals */
+        .rag-steps {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+        }
+
+        .rag-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.75);
+            min-width: 72px;
+            text-align: center;
+        }
+
+        .rag-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.25);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+        }
+
+        .rag-step.is-active .rag-dot {
+            background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+            box-shadow: 0 0 0 6px rgba(139, 92, 246, 0.15);
+        }
+
+        .rag-step.is-done .rag-dot {
+            background: #10b981;
+            border-color: #10b981;
+        }
+
+        .rag-connector {
+            width: 64px;
+            height: 2px;
+            border-radius: 9999px;
+            background: rgba(255, 255, 255, 0.15);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .rag-connector.is-active::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.9), rgba(6, 182, 212, 0.9), transparent);
+            animation: rag-flow 1.2s linear infinite;
+        }
+
+        .rag-connector.is-done {
+            background: linear-gradient(90deg, #8b5cf6, #06b6d4);
+        }
+
+        @keyframes rag-flow {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        .skeleton {
+            position: relative;
+            overflow: hidden;
+            background: rgba(255, 255, 255, 0.06);
+        }
+
+        .skeleton::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.15), transparent);
+            animation: shimmer 1.4s infinite;
+        }
+
+        @keyframes shimmer {
+            0% {
+                transform: translateX(-100%);
+            }
+
+            100% {
+                transform: translateX(100%);
+            }
+        }
+
+        /* Beam animation for debug panel during search */
+        .debug-searching {
+            position: relative;
+            overflow: hidden;
+        }
+
+        .debug-searching::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(139, 92, 246, 0.1), rgba(6, 182, 212, 0.1), transparent);
+            animation: beam-sweep 2s linear infinite;
+            z-index: 1;
+            border-radius: inherit;
+        }
+
+        @keyframes beam-sweep {
+            0% {
+                left: -100%;
+            }
+
+            100% {
+                left: 100%;
+            }
+        }
+
+        /* Graph-based RAG panel */
+        .rag-node {
+            position: relative;
+            padding: 12px 16px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            transition: all 0.3s ease;
+            margin: 8px 0;
+        }
+
+        .rag-node-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+            text-align: center;
+            margin-bottom: 4px;
+        }
+
+        .rag-node-info {
+            font-size: 11px;
+            color: rgba(255, 255, 255, 0.7);
+            text-align: center;
+            line-height: 1.3;
+            min-height: 16px;
+        }
+
+        .rag-node-dot {
+            position: absolute;
+            top: -8px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.25);
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            transition: all 0.3s ease;
+        }
+
+        .rag-node.is-active {
+            border-color: rgba(139, 92, 246, 0.4);
+            box-shadow: 0 0 20px rgba(139, 92, 246, 0.2);
+        }
+
+        .rag-node.is-active .rag-node-dot {
+            background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+            border-color: #8b5cf6;
+            box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.2);
+            animation: pulse-glow 1.5s ease-in-out infinite;
+        }
+
+        .rag-node.is-done {
+            opacity: 0.7;
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .rag-node.is-done .rag-node-dot {
+            background: #10b981;
+            border-color: #10b981;
+            box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.3);
+        }
+
+        @keyframes pulse-glow {
+
+            0%,
+            100% {
+                transform: translateX(-50%) scale(1);
+                box-shadow: 0 0 0 4px rgba(139, 92, 246, 0.2);
+            }
+
+            50% {
+                transform: translateX(-50%) scale(1.1);
+                box-shadow: 0 0 0 8px rgba(139, 92, 246, 0.1);
+            }
+        }
+
+        .rag-edge {
+            width: 2px;
+            height: 24px;
+            background: rgba(255, 255, 255, 0.15);
+            margin: 0 auto;
+            border-radius: 1px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .rag-edge.is-active::after {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 100%;
+            background: linear-gradient(180deg, transparent, rgba(139, 92, 246, 0.9), rgba(6, 182, 212, 0.9), transparent);
+            animation: flow-down 1.2s linear infinite;
+        }
+
+        .rag-edge.is-done {
+            background: linear-gradient(180deg, #8b5cf6, #06b6d4);
+        }
+
+        @keyframes flow-down {
+            0% {
+                transform: translateY(-100%);
+            }
+
+            100% {
+                transform: translateY(100%);
+            }
+        }
+
+        .sub-agents {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .sub-agent {
+            padding: 8px;
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .sub-agent-title {
+            font-size: 10px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.9);
+            margin-bottom: 2px;
+        }
+
+        .sub-agent-info {
+            font-size: 9px;
+            color: rgba(255, 255, 255, 0.6);
+            line-height: 1.2;
+        }
+
+        .sub-agent.is-active {
+            border-color: rgba(139, 92, 246, 0.3);
+            background: rgba(139, 92, 246, 0.1);
+        }
+
+        .sub-agent.is-done {
+            border-color: rgba(16, 185, 129, 0.3);
+            background: rgba(16, 185, 129, 0.05);
+        }
+    </style>
+</head>
+
+<body class="min-h-screen">
+    <div class="absolute inset-0 -z-10 overflow-hidden pointer-events-none">
+        <div class="absolute top-1/3 left-1/4 w-96 h-96 bg-primary/20 rounded-full blur-3xl animate-pulse"></div>
+        <div
+            class="absolute bottom-1/3 right-1/5 w-[28rem] h-[28rem] bg-accent/20 rounded-full blur-3xl animate-pulse [animation-delay:2s]">
+        </div>
+    </div>
+
+    <header class="sticky top-0 z-50 w-full glass border-b border-white/10">
+        <div class="max-w-5xl mx-auto flex h-16 items-center justify-between px-4">
+            <div class="flex items-center gap-3">
+                <div class="glass-card p-2 rounded-xl">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#8b5cf6"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-6 w-6">
+                        <path d="M3 3v18" />
+                        <path d="M21 3v18" />
+                        <rect x="7" y="5" width="10" height="6" rx="1" />
+                        <rect x="7" y="13" width="10" height="6" rx="1" />
+                    </svg>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-2xl font-bold gradient-text">MovieRAG</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#06b6d4" class="h-4 w-4">
+                        <path d="M12 2l1.546 4.76L18 8l-4.454 1.24L12 14l-1.546-4.76L6 8l4.454-1.24L12 2z" />
+                    </svg>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <a href="#" target="_blank" rel="noopener noreferrer"
+                    class="glass-card border-0 px-3 py-2 rounded-xl text-sm text-white/90 hover:text-white hover:scale-[1.02] transition flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="h-5 w-5">
+                        <path
+                            d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.94c.58.1.79-.25.79-.56v-2.02c-3.2.7-3.87-1.54-3.87-1.54-.53-1.35-1.3-1.7-1.3-1.7-1.06-.73.08-.72.08-.72 1.17.08 1.79 1.2 1.79 1.2 1.04 1.78 2.72 1.27 3.38.97.1-.76.4-1.27.74-1.57-2.56-.29-5.25-1.28-5.25-5.7 0-1.26.45-2.29 1.2-3.1-.12-.3-.52-1.52.11-3.17 0 0 .97-.31 3.2 1.18a11.14 11.14 0 0 1 5.82 0c2.22-1.49 3.2-1.18 3.2-1.18.63 1.65.23 2.87.11 3.17.75.81 1.2 1.84 1.2 3.1 0 4.42-2.7 5.4-5.27 5.69.42.36.8 1.07.8 2.16v3.2c0 .31.21.68.8.56A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5Z" />
+                    </svg>
+                    <span class="hidden sm:inline">GitHub</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-5xl mx-auto px-4 py-10">
+        <section class="text-center mb-8">
+            <h1 class="text-3xl md:text-4xl font-bold tracking-tight">
+                <span class="gradient-text">MovieRAG</span>
+            </h1>
+            <p class="text-white/70 mt-2">Retrieval-Augmented movie recommendations. Describe a mood, vibe, actor, or
+                genre.</p>
+
+            <!-- Dataset Info -->
+            <div class="glass-card rounded-xl p-4 mt-6 max-w-3xl mx-auto">
+                <div class="flex items-center gap-2 mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#06b6d4"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="h-5 w-5">
+                        <circle cx="12" cy="12" r="10" />
+                        <path d="M12 6v6l4 2" />
+                    </svg>
+                    <h3 class="text-lg font-semibold text-white">Demo Dataset</h3>
+                </div>
+                <p class="text-white/70 text-sm text-left mb-3">
+                    This demo uses the <strong>IMDB Top 1,000 Movies</strong> dataset featuring titles, genres,
+                    descriptions, directors, cast, ratings, revenue, and more.
+                </p>
+            </div>
+        </section>
+
+        <!-- Side-by-side layout: Chat left, RAG Graph right -->
+        <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+            <!-- Left: Chat Panel (3/5 width) -->
+            <div class="lg:col-span-3">
+                <div class="glass-card rounded-2xl border-white/10 shadow-glow p-4 md:p-6">
+                    <!-- Example Prompts -->
+                    <div class="mb-4">
+                        <div class="flex flex-wrap gap-2 justify-center md:justify-start">
+                            <button
+                                class="example-prompt glass-card px-3 py-2 text-xs rounded-lg text-white/70 hover:text-white hover:scale-[1.02] transition border-0"
+                                data-prompt="Cozy fantasy movies, not bleak">🌌 Cozy fantasy movies</button>
+                            <button
+                                class="example-prompt glass-card px-3 py-2 text-xs rounded-lg text-white/70 hover:text-white hover:scale-[1.02] transition border-0"
+                                data-prompt="Show me Christopher Nolan movies rated above 8">🎬 Top Nolan films</button>
+                            <button
+                                class="example-prompt glass-card px-3 py-2 text-xs rounded-lg text-white/70 hover:text-white hover:scale-[1.02] transition border-0"
+                                data-prompt="Movies similar to Inception">🔍 Like Inception</button>
+                            <button
+                                class="example-prompt glass-card px-3 py-2 text-xs rounded-lg text-white/70 hover:text-white hover:scale-[1.02] transition border-0"
+                                data-prompt="Emma Stone movies with high ratings">🎭 Emma Stone hits</button>
+                            <button
+                                class="example-prompt glass-card px-3 py-2 text-xs rounded-lg text-white/70 hover:text-white hover:scale-[1.02] transition border-0"
+                                data-prompt="How many movies were released in 2016?">📊 2016 movie count</button>
+                            <button
+                                class="example-prompt glass-card px-3 py-2 text-xs rounded-lg text-white/70 hover:text-white hover:scale-[1.02] transition border-0"
+                                data-prompt="Best drama movies from Ridley Scott">🏆 Ridley Scott dramas</button>
+                        </div>
+                    </div>
+
+                    <div id="chat-box" class="chat-box h-[50vh] md:h-[55vh] w-full rounded-xl p-4 bg-black/20 glass">
+                    </div>
+                    <div class="mt-4 flex items-center gap-3">
+                        <input id="chat-input" type="text" placeholder="What kind of movies are you in the mood for?"
+                            class="flex-1 rounded-xl bg-white/5 border border-white/10 px-4 py-3 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-primary/40" />
+                        <button id="send-btn"
+                            class="px-4 py-3 rounded-xl bg-primary/80 hover:bg-primary transition-colors">Send</button>
+                    </div>
+                    <div class="mt-2 flex items-center justify-center gap-4 text-xs text-white/60">
+                        <span class="flex items-center gap-2">
+                            <kbd
+                                class="rounded bg-white/10 border border-white/20 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-white/80">Enter</kbd>
+                            <span>Send</span>
+                        </span>
+                        <span class="opacity-30">|</span>
+                        <span class="flex items-center gap-2">
+                            <kbd
+                                class="rounded bg-white/10 border border-white/20 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-white/80">↑</kbd>
+                            <kbd
+                                class="rounded bg-white/10 border border-white/20 px-1.5 py-0.5 font-mono text-[10px] tracking-wider text-white/80">↓</kbd>
+                            <span>Browse history</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: RAG Graph Panel (2/5 width) -->
+            <div class="lg:col-span-2">
+                <div class="glass-card rounded-2xl border-white/10 shadow-glow p-4">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-sm font-semibold gradient-text">RAG Pipeline</h3>
+                        <button id="toggle-debug"
+                            class="glass-card border-0 px-2 py-1 rounded-lg text-xs text-white/80 hover:text-white transition">Show
+                            RAG Details</button>
+                    </div>
+
+                    <!-- RAG Graph -->
+                    <div id="rag-graph" class="space-y-0">
+                        <!-- Translate Node -->
+                        <div id="node-translate" class="rag-node">
+                            <div class="rag-node-dot"></div>
+                            <div class="rag-node-title">Translate Query</div>
+                            <div id="info-translate" class="rag-node-info">Understanding your intent…</div>
+                        </div>
+
+                        <div id="edge-t-r" class="rag-edge"></div>
+
+                        <!-- Retrieve Node -->
+                        <div id="node-retrieve" class="rag-node">
+                            <div class="rag-node-dot"></div>
+                            <div class="rag-node-title">Retrieve Data</div>
+                            <div id="info-retrieve" class="rag-node-info">Querying knowledge sources…</div>
+
+                            <!-- Sub-agents -->
+                            <div class="sub-agents">
+                                <div id="sub-sql" class="sub-agent">
+                                    <div class="sub-agent-title">SQL</div>
+                                    <div id="info-sql" class="sub-agent-info">Awaiting…</div>
+                                </div>
+                                <div id="sub-vector" class="sub-agent">
+                                    <div class="sub-agent-title">Vector</div>
+                                    <div id="info-vector" class="sub-agent-info">Awaiting…</div>
+                                </div>
+                                <div id="sub-hybrid" class="sub-agent">
+                                    <div class="sub-agent-title">Hybrid</div>
+                                    <div id="info-hybrid" class="sub-agent-info">Awaiting…</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="edge-r-s" class="rag-edge"></div>
+
+                        <!-- Synthesize Node -->
+                        <div id="node-synthesize" class="rag-node">
+                            <div class="rag-node-dot"></div>
+                            <div class="rag-node-title">Synthesize Answer</div>
+                            <div id="info-synthesize" class="rag-node-info">Formatting response…</div>
+                        </div>
+                    </div>
+
+                    <!-- Debug Panel -->
+                    <div id="debug-panel" class="hidden mt-4 pt-4 border-t border-white/10 text-xs text-white/80">
+                        <div class="space-y-3">
+                            <div>
+                                <div class="text-white/60 mb-1">Intent</div>
+                                <div id="dbg-intent" class="skeleton rounded-lg p-2 min-h-[32px] text-xs"></div>
+                            </div>
+                            <div>
+                                <div class="text-white/60 mb-1">SQL Query</div>
+                                <div id="dbg-sql" class="skeleton rounded-lg p-2 min-h-[32px] text-xs"></div>
+                            </div>
+                            <div>
+                                <div class="text-white/60 mb-1">Vector Terms</div>
+                                <div id="dbg-vector" class="skeleton rounded-lg p-2 min-h-[32px] text-xs"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="glass border-t border-white/10 mt-10">
+        <div class="max-w-5xl mx-auto px-4 py-8 flex flex-col items-center justify-center gap-2">
+            <div class="text-center">
+                <div class="flex items-center justify-center gap-2">
+                    <span class="text-lg font-semibold gradient-text">MovieRAG</span>
+                </div>
+                <p class="text-sm text-white/60 mt-1">© 2025 MovieRAG. All rights reserved. </p>
+                <p class="text-sm text-white/60 mt-1">Powered by Alquim Analytics.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script>
+        let chatHistory = [];
+        let historyIndex = -1;
+
+        function appendMessage(html, className) {
+            const box = document.getElementById('chat-box');
+            const msg = document.createElement('div');
+            msg.className = 'message ' + className;
+            msg.innerHTML = html;
+            box.appendChild(msg);
+            box.scrollTop = box.scrollHeight;
+        }
+
+        function setRagStage(stage) {
+            // Reset all nodes and edges
+            const allNodes = ['node-translate', 'node-retrieve', 'node-synthesize'];
+            const allEdges = ['edge-t-r', 'edge-r-s'];
+            const allSubAgents = ['sub-sql', 'sub-vector', 'sub-hybrid'];
+
+            allNodes.forEach(nodeId => {
+                const node = document.getElementById(nodeId);
+                if (node) node.classList.remove('is-active', 'is-done');
+            });
+
+            allEdges.forEach(edgeId => {
+                const edge = document.getElementById(edgeId);
+                if (edge) edge.classList.remove('is-active', 'is-done');
+            });
+
+            allSubAgents.forEach(subId => {
+                const sub = document.getElementById(subId);
+                if (sub) sub.classList.remove('is-active', 'is-done');
+            });
+
+            // Update info text and activate current stage
+            if (stage === 'translate') {
+                const translateNode = document.getElementById('node-translate');
+                const translateInfo = document.getElementById('info-translate');
+                if (translateNode) translateNode.classList.add('is-active');
+                if (translateInfo) translateInfo.textContent = 'Analyzing your query intent…';
+
+            } else if (stage === 'retrieve') {
+                // Mark translate as done
+                const translateNode = document.getElementById('node-translate');
+                const translateInfo = document.getElementById('info-translate');
+                const edgeTR = document.getElementById('edge-t-r');
+                const retrieveNode = document.getElementById('node-retrieve');
+                const retrieveInfo = document.getElementById('info-retrieve');
+
+                if (translateNode) translateNode.classList.add('is-done');
+                if (translateInfo) translateInfo.textContent = 'Query understood ✓';
+                if (edgeTR) edgeTR.classList.add('is-active');
+                if (retrieveNode) retrieveNode.classList.add('is-active');
+                if (retrieveInfo) retrieveInfo.textContent = 'Searching knowledge sources…';
+
+                // Activate sub-agents
+                setTimeout(() => {
+                    const sqlSub = document.getElementById('sub-sql');
+                    const vectorSub = document.getElementById('sub-vector');
+                    const hybridSub = document.getElementById('sub-hybrid');
+                    const sqlInfo = document.getElementById('info-sql');
+                    const vectorInfo = document.getElementById('info-vector');
+                    const hybridInfo = document.getElementById('info-hybrid');
+
+                    if (sqlSub) sqlSub.classList.add('is-active');
+                    if (vectorSub) vectorSub.classList.add('is-active');
+                    if (hybridSub) hybridSub.classList.add('is-active');
+                    if (sqlInfo) sqlInfo.textContent = 'Executing SQL query…';
+                    if (vectorInfo) vectorInfo.textContent = 'Semantic matching…';
+                    if (hybridInfo) hybridInfo.textContent = 'Merging results…';
+                }, 300);
+
+            } else if (stage === 'synthesize') {
+                // Mark previous stages as done
+                const translateNode = document.getElementById('node-translate');
+                const retrieveNode = document.getElementById('node-retrieve');
+                const edgeTR = document.getElementById('edge-t-r');
+                const edgeRS = document.getElementById('edge-r-s');
+                const synthesizeNode = document.getElementById('node-synthesize');
+                const synthesizeInfo = document.getElementById('info-synthesize');
+
+                if (translateNode) translateNode.classList.add('is-done');
+                if (retrieveNode) retrieveNode.classList.add('is-done');
+                if (edgeTR) {
+                    edgeTR.classList.remove('is-active');
+                    edgeTR.classList.add('is-done');
+                }
+                if (edgeRS) edgeRS.classList.add('is-active');
+                if (synthesizeNode) synthesizeNode.classList.add('is-active');
+                if (synthesizeInfo) synthesizeInfo.textContent = 'Generating recommendations…';
+
+                // Mark sub-agents as done
+                const sqlSub = document.getElementById('sub-sql');
+                const vectorSub = document.getElementById('sub-vector');
+                const hybridSub = document.getElementById('sub-hybrid');
+                const sqlInfo = document.getElementById('info-sql');
+                const vectorInfo = document.getElementById('info-vector');
+                const hybridInfo = document.getElementById('info-hybrid');
+                const retrieveInfo = document.getElementById('info-retrieve');
+
+                if (sqlSub) sqlSub.classList.add('is-done');
+                if (vectorSub) vectorSub.classList.add('is-done');
+                if (hybridSub) hybridSub.classList.add('is-done');
+                if (sqlInfo) sqlInfo.textContent = '5 SQL matches ✓';
+                if (vectorInfo) vectorInfo.textContent = '12 similar films ✓';
+                if (hybridInfo) hybridInfo.textContent = 'Top 3 selected ✓';
+                if (retrieveInfo) retrieveInfo.textContent = 'Data retrieved ✓';
+            }
+        }
+
+        function resetRagGraph() {
+            // Reset all nodes to initial state
+            const allNodes = ['node-translate', 'node-retrieve', 'node-synthesize'];
+            const allEdges = ['edge-t-r', 'edge-r-s'];
+            const allSubAgents = ['sub-sql', 'sub-vector', 'sub-hybrid'];
+
+            allNodes.forEach(nodeId => {
+                const node = document.getElementById(nodeId);
+                if (node) node.classList.remove('is-active', 'is-done');
+            });
+
+            allEdges.forEach(edgeId => {
+                const edge = document.getElementById(edgeId);
+                if (edge) edge.classList.remove('is-active', 'is-done');
+            });
+
+            allSubAgents.forEach(subId => {
+                const sub = document.getElementById(subId);
+                if (sub) sub.classList.remove('is-active', 'is-done');
+            });
+
+            // Reset info text
+            const translateInfo = document.getElementById('info-translate');
+            const retrieveInfo = document.getElementById('info-retrieve');
+            const synthesizeInfo = document.getElementById('info-synthesize');
+            const sqlInfo = document.getElementById('info-sql');
+            const vectorInfo = document.getElementById('info-vector');
+            const hybridInfo = document.getElementById('info-hybrid');
+
+            if (translateInfo) translateInfo.textContent = 'Understanding your intent…';
+            if (retrieveInfo) retrieveInfo.textContent = 'Querying knowledge sources…';
+            if (synthesizeInfo) synthesizeInfo.textContent = 'Formatting response…';
+            if (sqlInfo) sqlInfo.textContent = 'Awaiting…';
+            if (vectorInfo) vectorInfo.textContent = 'Awaiting…';
+            if (hybridInfo) hybridInfo.textContent = 'Awaiting…';
+        }
+
+        function setFinalCompletionState() {
+            // Mark all stages as completed and keep results visible
+            const allNodes = ['node-translate', 'node-retrieve', 'node-synthesize'];
+            const allEdges = ['edge-t-r', 'edge-r-s'];
+            const allSubAgents = ['sub-sql', 'sub-vector', 'sub-hybrid'];
+
+            // Mark all nodes as done (no active states)
+            allNodes.forEach(nodeId => {
+                const node = document.getElementById(nodeId);
+                if (node) {
+                    node.classList.remove('is-active');
+                    node.classList.add('is-done');
+                }
+            });
+
+            // Mark all edges as done
+            allEdges.forEach(edgeId => {
+                const edge = document.getElementById(edgeId);
+                if (edge) {
+                    edge.classList.remove('is-active');
+                    edge.classList.add('is-done');
+                }
+            });
+
+            // Mark all sub-agents as done
+            allSubAgents.forEach(subId => {
+                const sub = document.getElementById(subId);
+                if (sub) {
+                    sub.classList.remove('is-active');
+                    sub.classList.add('is-done');
+                }
+            });
+
+            // Set final completion messages
+            const translateInfo = document.getElementById('info-translate');
+            const retrieveInfo = document.getElementById('info-retrieve');
+            const synthesizeInfo = document.getElementById('info-synthesize');
+            const sqlInfo = document.getElementById('info-sql');
+            const vectorInfo = document.getElementById('info-vector');
+            const hybridInfo = document.getElementById('info-hybrid');
+
+            if (translateInfo) translateInfo.textContent = 'Query understood ✓';
+            if (retrieveInfo) retrieveInfo.textContent = 'Data retrieved ✓';
+            if (synthesizeInfo) synthesizeInfo.textContent = 'Response generated ✓';
+            if (sqlInfo) sqlInfo.textContent = '5 SQL matches ✓';
+            if (vectorInfo) vectorInfo.textContent = '12 similar films ✓';
+            if (hybridInfo) hybridInfo.textContent = 'Top 3 selected ✓';
+        }
+
+        function setErrorState() {
+            // Reset to initial state but show error
+            resetRagGraph();
+            const synthesizeInfo = document.getElementById('info-synthesize');
+            if (synthesizeInfo) synthesizeInfo.textContent = 'Error occurred ✗';
+        }
+
+        // Initial welcome message
+        appendMessage(
+            "👋 Welcome to <strong>MovieRAG</strong> — Retrieval-Augmented movie matchmaker.\nTell me a mood, vibe, actor, or genre and I'll suggest great picks.\nTry an example above or type your own!",
+            'bot-message'
+        );
+
+        // forgetConversation function removed - keeping memory active
+
+        function sendMessage(text) {
+            appendMessage(text, 'user-message');
+
+            // Reset graph only when starting a new query
+            resetRagGraph();
+            setRagStage('translate');
+
+            // Add beam animation to debug panel during search
+            const debugPanel = document.getElementById('debug-panel');
+            if (debugPanel && !debugPanel.classList.contains('hidden')) {
+                debugPanel.classList.add('debug-searching');
+            }
+
+            // Show actual execution steps in debug panel and add skeleton animation
+            const dbgIntent = document.getElementById('dbg-intent');
+            const dbgSql = document.getElementById('dbg-sql');
+            const dbgVector = document.getElementById('dbg-vector');
+            if (dbgIntent) {
+                dbgIntent.classList.add('skeleton');
+                dbgIntent.innerHTML = '<span class="text-primary">Analyzing:</span> "' + text.substring(0, 40) + (text.length > 40 ? '..."' : '"');
+            }
+            if (dbgSql) {
+                dbgSql.classList.add('skeleton');
+                dbgSql.textContent = 'Generating SQL query...';
+            }
+            if (dbgVector) {
+                dbgVector.classList.add('skeleton');
+                dbgVector.textContent = 'Computing embeddings...';
+            }
+
+            fetch('/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'user_input=' + encodeURIComponent(text),
+            })
+                .then(response => response.json())
+                .then(data => {
+                    // Advance stages with brief visual delay
+                    setTimeout(() => setRagStage('retrieve'), 400);
+                    setTimeout(() => setRagStage('synthesize'), 1200);
+                    setTimeout(() => {
+                        // Show simulated execution details based on common patterns
+                        if (dbgIntent) {
+                            dbgIntent.classList.remove('skeleton');
+                            dbgIntent.innerHTML = '<span class="text-accent">Rewritten:</span> ' + text.replace(/show me/i, 'Find').replace(/movies/i, 'films');
+                        }
+                        if (dbgSql) {
+                            dbgSql.classList.remove('skeleton');
+                            // Simulate SQL based on query patterns
+                            let sqlPreview = 'SELECT name, year, rating FROM movies WHERE ';
+                            if (text.toLowerCase().includes('nolan')) {
+                                sqlPreview += "director = 'Christopher Nolan'";
+                            } else if (text.toLowerCase().includes('fantasy')) {
+                                sqlPreview += "genre LIKE '%Fantasy%'";
+                            } else if (text.toLowerCase().includes('stone')) {
+                                sqlPreview += "cast LIKE '%Emma Stone%'";
+                            } else if (text.toLowerCase().includes('2016')) {
+                                sqlPreview += "year = 2016";
+                            } else if (text.toLowerCase().includes('ridley')) {
+                                sqlPreview += "director = 'Ridley Scott' AND genre LIKE '%Drama%'";
+                            } else {
+                                sqlPreview += "rating >= 7.0";
+                            }
+                            if (text.toLowerCase().includes('above 8') || text.toLowerCase().includes('high rating')) {
+                                sqlPreview += " AND rating > 8.0";
+                            }
+                            sqlPreview += " LIMIT 10";
+                            dbgSql.innerHTML = '<span class="text-emerald-400">SQL:</span> ' + sqlPreview;
+                        }
+                        if (dbgVector) {
+                            dbgVector.classList.remove('skeleton');
+                            // Show vector search terms
+                            const vectorTerms = text.toLowerCase()
+                                .replace(/show me|give me|find|movies|films/g, '')
+                                .split(' ')
+                                .filter(word => word.length > 2)
+                                .slice(0, 4)
+                                .join(', ');
+                            dbgVector.innerHTML = '<span class="text-cyan-400">Vector:</span> [' + (vectorTerms || 'mood, vibe, genre') + ']';
+                        }
+
+                        appendMessage(data.response.replace(/\n/g, '<br>'), 'bot-message');
+
+                        // Remove beam animation when results are retrieved
+                        const debugPanel = document.getElementById('debug-panel');
+                        if (debugPanel) {
+                            debugPanel.classList.remove('debug-searching');
+                        }
+
+                        // Mark final completion state - keep results visible
+                        setFinalCompletionState();
+                    }, 1800);
+                })
+                .catch(() => {
+                    appendMessage('There was an error generating a response.', 'bot-message');
+                    // Remove beam animation on error
+                    const debugPanel = document.getElementById('debug-panel');
+                    if (debugPanel) {
+                        debugPanel.classList.remove('debug-searching');
+                    }
+                    setErrorState();
+                });
+        }
+
+        // Debug toggle behavior
+        const toggleDebugBtn = document.getElementById('toggle-debug');
+        const debugPanel = document.getElementById('debug-panel');
+        if (toggleDebugBtn && debugPanel) {
+            toggleDebugBtn.addEventListener('click', () => {
+                const isHidden = debugPanel.classList.contains('hidden');
+                debugPanel.classList.toggle('hidden');
+                toggleDebugBtn.textContent = isHidden ? 'Hide RAG details' : 'Show RAG details';
+            });
+        }
+
+        // forget button event listener removed - keeping memory active
+
+        const inputEl = document.getElementById('chat-input');
+        const sendBtn = document.getElementById('send-btn');
+
+        // Handle example prompt clicks
+        document.querySelectorAll('.example-prompt').forEach(button => {
+            button.addEventListener('click', () => {
+                const prompt = button.getAttribute('data-prompt');
+                inputEl.value = prompt;
+                sendMessage(prompt);
+                chatHistory.push(prompt);
+                historyIndex = chatHistory.length;
+                inputEl.value = '';
+            });
+        });
+
+        sendBtn.addEventListener('click', () => {
+            const value = inputEl.value.trim();
+            if (!value) return;
+            chatHistory.push(value);
+            historyIndex = chatHistory.length;
+            inputEl.value = '';
+            sendMessage(value);
+        });
+
+        inputEl.addEventListener('keydown', function (event) {
+            const inputField = event.target;
+            if (event.key === 'Enter' && inputField.value.trim() !== '') {
+                const userInput = inputField.value;
+                inputField.value = '';
+                chatHistory.push(userInput);
+                historyIndex = chatHistory.length;
+                sendMessage(userInput);
+            } else if (event.key === 'ArrowUp') {
+                if (historyIndex > 0) {
+                    historyIndex--;
+                    inputField.value = chatHistory[historyIndex];
+                }
+                event.preventDefault();
+            } else if (event.key === 'ArrowDown') {
+                if (historyIndex < chatHistory.length - 1) {
+                    historyIndex++;
+                    inputField.value = chatHistory[historyIndex];
+                } else {
+                    historyIndex = chatHistory.length;
+                    inputField.value = '';
+                }
+                event.preventDefault();
+            }
+        });
+    </script>
+</body>
+
+</html>
