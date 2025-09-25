@@ -4,6 +4,7 @@
 import os, json, sqlite3
 from typing import Literal
 from pydantic import BaseModel
+from typing import Optional, List
 
 from langchain_core.messages import BaseMessage, SystemMessage, AIMessage, HumanMessage
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -13,6 +14,20 @@ from langchain_community.vectorstores import SKLearnVectorStore
 from langchain_community.utilities import SQLDatabase
 
 from .tools import SQLTool, SKLearnVectorStoreTool, SupervisorTool
+
+
+class MovieFilter(BaseModel):
+    """Pydantic model for structured movie filter extraction."""
+    title: Optional[str] = None
+    director: Optional[str] = None
+    actor: Optional[str] = None
+    genre: Optional[str] = None
+    year_min: Optional[int] = None
+    year_max: Optional[int] = None
+    rating_min: Optional[float] = None
+    rating_max: Optional[float] = None
+    limit: Optional[int] = None
+    description_keywords: Optional[List[str]] = None
 
 # Original source of this prompt template: langchain.hub.pull('langchain-ai/sql-agent-system-prompt') 
 # Modified to include reasoning and CoT
@@ -145,7 +160,7 @@ class HybridAgent:
             ("user", "{query}")
         ])
 
-        self.llm_structured = self.llm.with_structured_output(dict)
+        self.llm_structured = self.llm.with_structured_output(MovieFilter)
 
         # Vector store for re-ranking
         if os.path.exists(self.vs_store_path):
@@ -157,23 +172,23 @@ class HybridAgent:
         else:
             self.vs = None
 
-    def _build_sql_where(self, filt: dict) -> str:
+    def _build_sql_where(self, filt: MovieFilter) -> str:
         clauses = []
         params = []
         
-        if filt.get('title'):
+        if filt.title:
             clauses.append("\"name\" LIKE ?")
-            params.append(f"%{filt['title']}%")
-        if filt.get('director'):
+            params.append(f"%{filt.title}%")
+        if filt.director:
             clauses.append("\"director\" LIKE ?")
-            params.append(f"%{filt['director']}%")
-        if filt.get('actor'):
+            params.append(f"%{filt.director}%")
+        if filt.actor:
             clauses.append("\"cast\" LIKE ?")
-            params.append(f"%{filt['actor']}%")
+            params.append(f"%{filt.actor}%")
         
         # Enhanced genre filtering with case-insensitive matching
-        if filt.get('genre'):
-            genre = filt['genre'].lower()
+        if filt.genre:
+            genre = filt.genre.lower()
             # Handle common genre variations
             genre_variations = {
                 'sci-fi': ['sci-fi', 'science fiction', 'science-fiction'],
@@ -198,8 +213,8 @@ class HybridAgent:
                 clauses.append("(" + " OR ".join(genre_clauses) + ")")
         
         # Enhanced description filtering for mood/style keywords
-        if filt.get('description_keywords'):
-            keywords = filt['description_keywords']
+        if filt.description_keywords:
+            keywords = filt.description_keywords
             if isinstance(keywords, list):
                 for keyword in keywords:
                     keyword = keyword.lower().strip()
@@ -207,25 +222,25 @@ class HybridAgent:
                         clauses.append("(LOWER(\"description\") LIKE ? OR LOWER(\"genres\") LIKE ?)")
                         params.extend([f"%{keyword}%", f"%{keyword}%"])
         
-        if filt.get('year_min') is not None:
+        if filt.year_min is not None:
             clauses.append("\"year\" >= ?")
-            params.append(int(filt['year_min']))
-        if filt.get('year_max') is not None:
+            params.append(int(filt.year_min))
+        if filt.year_max is not None:
             clauses.append("\"year\" <= ?")
-            params.append(int(filt['year_max']))
-        if filt.get('rating_min') is not None:
+            params.append(int(filt.year_max))
+        if filt.rating_min is not None:
             clauses.append("\"rating\" >= ?")
-            params.append(float(filt['rating_min']))
-        if filt.get('rating_max') is not None:
+            params.append(float(filt.rating_min))
+        if filt.rating_max is not None:
             clauses.append("\"rating\" <= ?")
-            params.append(float(filt['rating_max']))
+            params.append(float(filt.rating_max))
         
         where = " WHERE " + " AND ".join(clauses) if clauses else ""
         return where, params
 
-    def _sql_prefilter(self, filt: dict, limit_default: int = 100):
+    def _sql_prefilter(self, filt: MovieFilter, limit_default: int = 100):
         where, params = self._build_sql_where(filt)
-        limit = int(filt.get('limit') or limit_default)
+        limit = int(filt.limit or limit_default)
         query = f"SELECT \"movie_id\", \"name\", \"year\", \"description\", \"director\", \"cast\", \"genres\", \"rating\" FROM movies{where} LIMIT {limit};"
         rows: list[dict] = []
         conn = sqlite3.connect(self.sqlite_path)
@@ -240,7 +255,7 @@ class HybridAgent:
             conn.close()
         return rows
 
-    def _rerank_with_vector(self, query_text: str, rows, filt: dict):
+    def _rerank_with_vector(self, query_text: str, rows, filt: MovieFilter):
         if not self.vs or not rows:
             return rows
         
@@ -274,8 +289,8 @@ class HybridAgent:
             
             # Apply negative filtering for "not" keywords
             negative_keywords = []
-            if filt.get('description_keywords'):
-                for kw in filt['description_keywords']:
+            if filt.description_keywords:
+                for kw in filt.description_keywords:
                     if isinstance(kw, str) and kw.lower().startswith('not '):
                         negative_keywords.append(kw.lower().replace('not ', '').strip())
             
@@ -303,9 +318,9 @@ class HybridAgent:
             
         except Exception as e:
             # Fallback: basic keyword filtering for negative terms
-            if filt.get('description_keywords'):
+            if filt.description_keywords:
                 negative_keywords = [kw.lower().replace('not ', '').strip() 
-                                   for kw in filt['description_keywords'] 
+                                   for kw in filt.description_keywords 
                                    if isinstance(kw, str) and kw.lower().startswith('not ')]
                 if negative_keywords:
                     rows = [row for row in rows 
@@ -319,10 +334,10 @@ class HybridAgent:
         query_text = state['messages'][-1].content
         try:
             filt = self.llm_structured.invoke(self.filter_prompt.format_messages(query=query_text))
-            if not isinstance(filt, dict):
-                filt = {}
+            if not isinstance(filt, MovieFilter):
+                filt = MovieFilter()
         except Exception:
-            filt = {}
+            filt = MovieFilter()
 
         rows = self._sql_prefilter(filt)
         rows = self._rerank_with_vector(query_text, rows, filt)
