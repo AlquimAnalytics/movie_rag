@@ -29,6 +29,10 @@ class Stager:
         self.landing_area = landing_area
         self.staging_area = staging_area
 
+        # Create staging area directory if it doesn't exist
+        if not os.path.exists(self.staging_area):
+            os.makedirs(self.staging_area)
+
         self.landing_archive = os.path.join(self.landing_area, 'archive')
         if not os.path.exists(self.landing_archive):
             os.makedirs(self.landing_archive)
@@ -124,9 +128,9 @@ class Stager:
         # Write the staged JSON as a list of records
         df.to_json(staging_fname, orient='records', force_ascii=False)
 
-        # Move the original movie file to the landing area's archive.
+        # Copy the original movie file to the landing area's archive (keep original).
         landing_archive_fname = os.path.join(self.landing_archive, fname)
-        shutil.move(landing_fname, landing_archive_fname)
+        shutil.copy2(landing_fname, landing_archive_fname)
 
         return
 

@@ -1,0 +1,88 @@
+name: Deploy to AWS
+
+on:
+    workflow_dispatch:
+    push:
+        branches:
+          - main
+
+env:
+    AWS_REGION: eu-central-1
+    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    PRIVATE_SSH_KEY: ${{ secrets.PRIVATE_SSH_KEY }}
+    PUBLIC_IP: ${{ secrets.PUBLIC_IP }}
+    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    DOCKER_REPOSITORY: eu-ai-nav
+    BACKEND_TAG: backend-${{ github.ref_name }}
+
+jobs:
+    publish-to-ecr:
+        runs-on: ubuntu-latest
+
+        steps:
+          - name: Checkout code
+            uses: actions/checkout@v2
+
+          - name: Login to AWS ECR
+            id: login-ecr
+            uses: aws-actions/amazon-ecr-login@v1
+          
+          - name: Build and push backend docker image
+            env:
+                REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+            run: |-
+                # Delete old backend image if exists
+                aws ecr batch-delete-image --repository-name $DOCKER_REPOSITORY --image-ids imageTag=$BACKEND_TAG --region $AWS_REGION || true
+                
+                # Build and push backend
+                docker build -f Docker/Dockerfile.backend -t $REGISTRY/$DOCKER_REPOSITORY:$BACKEND_TAG .
+                docker push $REGISTRY/$DOCKER_REPOSITORY:$BACKEND_TAG
+
+
+
+    pull-from-ecr-and-deploy:
+        needs: publish-to-ecr
+        runs-on: ubuntu-latest
+
+        steps:
+          - name: Login to AWS ECR
+            id: login-ecr
+            uses: aws-actions/amazon-ecr-login@v1
+          
+          - name: Deploy docker images to EC2
+            env:
+              REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+            uses: appleboy/ssh-action@master
+            with:
+              host: ${{ env.PUBLIC_IP }}
+              username: ec2-user
+              key: ${{ env.PRIVATE_SSH_KEY }}
+              envs: PRIVATE_SSH_KEY, REGISTRY, DOCKER_REPOSITORY, BACKEND_TAG, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, OPENAI_API_KEY
+              command_timeout: 15m
+              script: |-
+                echo "Deploying RAG Docker images to EC2..."
+                
+                # Login to ECR
+                echo $(aws ecr get-login-password --region $AWS_REGION) | sudo docker login --username AWS --password-stdin $REGISTRY
+            
+                # Stop and remove old containers
+                sudo docker stop rag-backend || true
+                sudo docker rm rag-backend || true
+                sudo docker system prune -a -f
+            
+                # Pull new Docker image
+                sudo docker pull $REGISTRY/$DOCKER_REPOSITORY:$BACKEND_TAG
+
+                # Create data directory for persistent storage
+                sudo mkdir -p /home/ec2-user/data
+                
+                # Run backend container (now serves both API and frontend)
+                sudo docker run -d \
+                  --name rag-backend \
+                  --restart=unless-stopped \
+                  -e OPENAI_API_KEY=$OPENAI_API_KEY \
+                  -p 8000:8000 \
+                  -v /home/ec2-user/email:/app/email \
+                  $REGISTRY/$DOCKER_REPOSITORY:$BACKEND_TAG
+              

@@ -263,15 +263,18 @@ class MovieTablerSQL:
 
 
 class MovieEmbedder:
-    def __init__(self, staging_area='', prepared_area='', embedding_store_fname='', embedding_model=''):
+    def __init__(self, staging_area='', prepared_area='', embedding_store_fname='', embedding_model='', openai_api_key=''):
         self.staging_area = staging_area
         self.prepared_area = prepared_area
         self.embedding_store_fname = embedding_store_fname
         self.embedding_model = embedding_model
+        self.openai_api_key = openai_api_key
 
         # Support both Ollama and OpenAI style embedding model ids
         if self.embedding_model.startswith('text-') or self.embedding_model.startswith('text-embedding-'):
-            self.embeddings = OpenAIEmbeddings(model=self.embedding_model)
+            # Use API key from config if provided, otherwise fall back to environment variable
+            api_key = self.openai_api_key if self.openai_api_key else None
+            self.embeddings = OpenAIEmbeddings(model=self.embedding_model, api_key=api_key)
         else:
             self.embeddings = OllamaEmbeddings(model=self.embedding_model)
 
@@ -310,7 +313,7 @@ class Prepper:
     in a database. The files processed from the staging area are stored in an archive there.
     """
     def __init__(self, staging_area='', prepared_area='', table_store_fname='', embedding_store_fname='',
-                 embedding_model='', graph_url='', graph_username='', graph_password='', verbose=False):
+                 embedding_model='', openai_api_key='', graph_url='', graph_username='', graph_password='', verbose=False):
         self.staging_area = staging_area
 
         self.staging_archive = os.path.join(self.staging_area, 'archive')
@@ -327,6 +330,7 @@ class Prepper:
             'prepared_area': prepared_area,
             'embedding_store_fname': embedding_store_fname,
             'embedding_model': embedding_model,
+            'openai_api_key': openai_api_key,
         }
         self.grapher_config = {}
 
@@ -379,6 +383,7 @@ if __name__ == '__main__':
         'table_store_fname': config.get('table_store_fname'),
         'embedding_model': config.get('embedding_model'),
         'embedding_store_fname': config.get('embedding_store_fname'),
+        'openai_api_key': config.get('openai_api_key'),
         'graph_url': config.get('graph_url'),
         'graph_username': config.get('graph_username'),
         'graph_password': config.get('graph_password'),

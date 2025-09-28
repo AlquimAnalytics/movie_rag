@@ -1,0 +1,98 @@
+name: MovieRAG Setup
+
+on:
+    workflow_dispatch:
+
+env:
+    AWS_REGION: eu-central-1
+    AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+    AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    PRIVATE_SSH_KEY: ${{ secrets.PRIVATE_SSH_KEY }}
+    PUBLIC_IP: ${{ secrets.PUBLIC_IP }}
+    DOCKER_REPOSITORY: movie-rag
+    IMAGE_TAG: movie-rag-${{ github.ref_name }}
+    
+jobs:
+    setup:
+        runs-on: ubuntu-latest
+
+        steps:
+          - name: Login to AWS ECR
+            id: login-ecr
+            uses: aws-actions/amazon-ecr-login@v1
+          
+          - name: Set Crontab for cycle and scan
+            env:
+              REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+            uses: appleboy/ssh-action@master
+            with:
+              host: ${{ env.PUBLIC_IP }}
+              username: ec2-user
+              key: ${{ env.PRIVATE_SSH_KEY }}
+              envs: PRIVATE_SSH_KEY, REGISTRY, DOCKER_REPOSITORY, IMAGE_TAG, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION
+              script: |-
+                # Add 1GB swap to EC2 instance
+                #sudo fallocate -l 1G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=1024
+                #sudo chmod 600 /swapfile
+                #sudo mkswap /swapfile
+                #sudo swapon /swapfile
+                #echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab
+                #sudo swapon --show
+                #free -h
+
+                echo "Setting up crontab for cycle and scan"
+                sudo yum update -y
+                sudo yum install cronie -y
+                
+                # Install necessary packages
+                sudo yum install docker -y
+                sudo yum install awscli -y
+
+                sudo yum install nginx -y
+                sudo yum install certbot python3-certbot-nginx -y
+
+                sudo systemctl start nginx
+                sudo systemctl enable nginx
+                sudo systemctl start docker
+                sudo systemctl enable docker
+                sudo systemctl start crond.service
+                sudo systemctl enable crond.service
+
+                # Configure Nginx for MovieRAG Docker container reverse proxy 
+                sudo bash -c 'cat > /etc/nginx/conf.d/demo.alquimanalytics.com.conf <<EOF
+                server {
+                    listen 80;
+                    server_name demo.alquimanalytics.com;
+
+                    # Route /movie-rag to container on port 5005
+                    location /movie-rag {
+                        proxy_pass http://127.0.0.1:5005/;
+                        proxy_set_header Host \$host;
+                        proxy_set_header X-Real-IP \$remote_addr;
+                        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+                        proxy_set_header X-Forwarded-Proto \$scheme;
+                        proxy_set_header X-Forwarded-Prefix /movie-rag;
+                        
+                        # WebSocket support for real-time features
+                        proxy_http_version 1.1;
+                        proxy_set_header Upgrade \$http_upgrade;
+                        proxy_set_header Connection "upgrade";
+                    }
+
+                    # Default route (optional - can point to a default service or return 404)
+                    location / {
+                        return 404;
+                    }
+                }
+                EOF'
+
+                # Validate and reload Nginx
+                sudo nginx -t && sudo systemctl reload nginx
+
+                # Wait for changes to take effect
+                sleep 10
+
+                # Install SSL certificate using Let's Encrypt
+                sudo certbot --nginx -d demo.alquimanalytics.com --non-interactive --agree-tos -m admin@demo.alquimanalytics.com
+
+                sudo systemctl status crond

@@ -1,0 +1,5 @@
+chatbot.cfg
+data/01_landing/archive/
+data/02_staging/
+data/03_prepared/
+__pycache__/
