@@ -13,7 +13,7 @@ env:
     PRIVATE_SSH_KEY: ${{ secrets.PRIVATE_SSH_KEY }}
     PUBLIC_IP: ${{ secrets.PUBLIC_IP }}
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    DOCKER_REPOSITORY: eu-ai-nav
+    DOCKER_REPOSITORY: movie-rag
     BACKEND_TAG: backend-${{ github.ref_name }}
 
 jobs:
