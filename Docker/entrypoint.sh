@@ -9,8 +9,8 @@ cat > movie_rag/chatbot.cfg << EOF
 {
     "_comment": "MovieRAG Configuration - Auto-generated with API key",
     
-    "host": "${HOST:-0.0.0.0}",
-    "port": ${PORT:-5005},
+    "host": "0.0.0.0",
+    "port": "5005",
     
     "_comment_data_pipeline": "Data pipeline directories (relative to config file)",
     "landing_area": "${LANDING_AREA:-../data/01_landing}",
