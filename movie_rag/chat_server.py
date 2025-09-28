@@ -23,7 +23,7 @@ except ImportError:  # direct script run from package directory
 
 
 def define_routes(server):
-    @server.app.route('/')
+    @server.app.route('/movie-rag')
     def index():
         return render_template('index.html')
 
