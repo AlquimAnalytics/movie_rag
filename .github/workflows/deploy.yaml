@@ -83,6 +83,5 @@ jobs:
                   --restart=unless-stopped \
                   -e OPENAI_API_KEY=$OPENAI_API_KEY \
                   -p 5005:5005 \
-                  -v /home/ec2-user/data:/app/data \
                   $REGISTRY/$DOCKER_REPOSITORY:$MOVIE_TAG
               
